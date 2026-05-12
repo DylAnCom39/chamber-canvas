@@ -172,15 +172,30 @@ function placeArc(items: FlatItem[], rows: RowPlan[]): SeatPos[] {
   return out;
 }
 
+function buildArc(
+  parties: Party[],
+  sections: Section[],
+  builder: (total: number) => RowPlan[],
+) {
+  // Iterate: gap depends on row count which depends on item count which depends on gap.
+  let gap = 1;
+  let items = flattenWithSections(parties, sections, gap);
+  let rows = builder(items.length);
+  for (let it = 0; it < 4 && rows.length !== gap; it++) {
+    gap = rows.length;
+    items = flattenWithSections(parties, sections, gap);
+    rows = builder(items.length);
+  }
+  return { items, rows };
+}
+
 export function hemicycleLayout(parties: Party[], sections: Section[]) {
-  const items = flattenWithSections(parties, sections);
-  const rows = buildHemicycleRows(items.length);
+  const { items, rows } = buildArc(parties, sections, buildHemicycleRows);
   return { seats: placeArc(items, rows), kind: "hemicycle" as const };
 }
 
 export function horseshoeLayout(parties: Party[], sections: Section[]) {
-  const items = flattenWithSections(parties, sections);
-  const rows = buildHorseshoeRows(items.length);
+  const { items, rows } = buildArc(parties, sections, buildHorseshoeRows);
   return { seats: placeArc(items, rows), kind: "horseshoe" as const };
 }
 
@@ -192,18 +207,23 @@ export function westminsterLayout(parties: Party[], sections: Section[]) {
   const dy = SPACING;
   const aisle = SPACING * 2.5;
 
-  function sideItems(side: WestminsterSide): FlatItem[] {
+  // Estimate row counts from raw seat totals (without gap padding).
+  const rawOpp = parties.filter((p) => p.side === "opposition").reduce((s, p) => s + p.seats, 0);
+  const rawGov = parties.filter((p) => p.side === "government").reduce((s, p) => s + p.seats, 0);
+  const rawCross = parties.filter((p) => p.side === "crossbench").reduce((s, p) => s + p.seats, 0);
+  const benchRows = Math.max(2, Math.ceil(Math.sqrt(Math.max(rawOpp, rawGov) / 4)));
+  const crossRows = Math.max(2, Math.ceil(Math.sqrt(rawCross / 6)));
+
+  function sideItems(side: WestminsterSide, gap: number): FlatItem[] {
     const sideParties = parties.filter((p) => p.side === side);
     const sideSections = sections.filter((s) => s.side === side);
-    return flattenWithSections(sideParties, sideSections);
+    return flattenWithSections(sideParties, sideSections, gap);
   }
 
-  const oppItems = sideItems("opposition");
-  const govItems = sideItems("government");
-  const crossItems = sideItems("crossbench");
+  const oppItems = sideItems("opposition", benchRows);
+  const govItems = sideItems("government", benchRows);
+  const crossItems = sideItems("crossbench", crossRows);
 
-  const benchRows = Math.max(2, Math.ceil(Math.sqrt(Math.max(oppItems.length, govItems.length) / 4)));
-  const crossRows = Math.max(2, Math.ceil(Math.sqrt(crossItems.length / 6)));
 
   function bench(items: FlatItem[], rows: number, originX: number, originY: number, dirX: 1 | -1) {
     const cols = Math.max(1, Math.ceil(items.length / rows));
