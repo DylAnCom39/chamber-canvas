@@ -120,7 +120,7 @@ function buildHorseshoeRows(total: number): RowPlan[] {
       const alloc = allocate(total, caps);
       return alloc.map((n, i) => {
         const r = (r0 + i) * SPACING;
-        const h = (H + i) * SPACING;
+        const h = H * SPACING;
         const totalLen = 2 * h + Math.PI * r;
         return {
           n,
