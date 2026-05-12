@@ -1,6 +1,6 @@
 import { forwardRef, useMemo } from "react";
-import type { Party, ParliamentConfig, SeatPos, Section } from "@/lib/parliament/types";
-import { SEAT_SPACING, computeLayout } from "@/lib/parliament/layouts";
+import type { Party, ParliamentConfig, SeatPos } from "@/lib/parliament/types";
+import { computeLayout } from "@/lib/parliament/layouts";
 
 interface Props {
   config: ParliamentConfig;
@@ -27,19 +27,6 @@ function partyMap(parties: Party[]) {
   return new Map(parties.map((p) => [p.id, p]));
 }
 
-/** Polar to cartesian using same convention as layouts (y = -r sin) */
-function polar(r: number, a: number) {
-  return { x: r * Math.cos(a), y: -r * Math.sin(a) };
-}
-
-function arcPath(rOuter: number, startA: number, endA: number) {
-  const p1 = polar(rOuter, startA);
-  const p2 = polar(rOuter, endA);
-  const sweep = endA < startA ? 1 : 0; // y-axis flipped
-  const large = Math.abs(endA - startA) > Math.PI ? 1 : 0;
-  return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${large} ${sweep} ${p2.x} ${p2.y}`;
-}
-
 export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref) => {
   const { layout, parties, sections, title } = config;
   const result = useMemo(() => computeLayout(layout, parties, sections), [layout, parties, sections]);
@@ -48,12 +35,12 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
 
   const bb = bbox(seats);
   const padX = 6;
-  const padTop = 14; // for section labels
+  const padTop = title ? 8 : 4;
   const padBottom = 4;
   const vbX = bb.minX - padX;
-  const vbY = bb.minY - padTop;
   const vbW = bb.maxX - bb.minX + padX * 2;
   const vbH = bb.maxY - bb.minY + padTop + padBottom;
+  const vbY = bb.minY - padTop;
 
   // Sections are visualized as physical gaps between seat groups (handled in layout).
 
