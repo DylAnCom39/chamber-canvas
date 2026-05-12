@@ -98,49 +98,52 @@ function buildHemicycleRows(total: number): RowPlan[] {
   return [];
 }
 
-/* ---------------- HORSESHOE (U) ---------------- */
+/* ---------------- HORSESHOE (EXACT U) ---------------- */
 
 /**
- * U-shape: two vertical columns + a curved bottom semicircle.
- * Path is traversed left→down→curve→up→right.
+ * Exact U-shape: two straight vertical arms joined by a straight flat base.
+ * Each row is an offset rectangular U, so the open top and arm ends stay flat.
+ * Path is traversed left↓, base →, right↑.
  */
 function buildHorseshoeRows(total: number): RowPlan[] {
   let R = 1;
   while (R < 200) {
     const r0 = R;
-    const H = r0 + R; // straight column height (in spacing units), keeps a balanced U
+    const H = r0 + R; // straight arm height (in spacing units), keeps a balanced U
     const caps: number[] = [];
     for (let i = 0; i < R; i++) {
-      const r = r0 + i;
-      const h = H; // all rows share the same column height → rectangular ends
-      const len = 2 * h + Math.PI * r;
+      const halfWidth = r0 + i;
+      const bottomOffset = i;
+      const vertical = H + bottomOffset;
+      const len = 2 * vertical + 2 * halfWidth;
       caps.push(Math.floor(len) + 1);
     }
     if (caps.reduce((a, b) => a + b, 0) >= total) {
       const alloc = allocate(total, caps);
       return alloc.map((n, i) => {
-        const r = (r0 + i) * SPACING;
-        const h = H * SPACING;
-        const totalLen = 2 * h + Math.PI * r;
+        const halfWidth = (r0 + i) * SPACING;
+        const topY = -H * SPACING;
+        const bottomY = i * SPACING;
+        const vertical = bottomY - topY;
+        const base = halfWidth * 2;
+        const totalLen = vertical * 2 + base;
         return {
           n,
           place: (j, k) => {
             const t = k === 1 ? 0.5 : j / (k - 1);
             const s = t * totalLen;
-            if (s <= h) {
-              // left column, top (-r,-h) → bottom (-r,0)
-              return { x: -r, y: -h + s };
+            if (s <= vertical) {
+              // left arm, top → bottom
+              return { x: -halfWidth, y: topY + s };
             }
-            const s2 = s - h;
-            const arcLen = Math.PI * r;
-            if (s2 <= arcLen) {
-              // bottom semicircle: angle param from π → 0 going through π/2 (bottom y=+r)
-              const u = s2 / r; // 0..π
-              return { x: -r * Math.cos(u), y: r * Math.sin(u) };
+            const s2 = s - vertical;
+            if (s2 <= base) {
+              // flat base, left → right
+              return { x: -halfWidth + s2, y: bottomY };
             }
-            const s3 = s2 - arcLen;
-            // right column, bottom (r,0) → top (r,-h)
-            return { x: r, y: -s3 };
+            const s3 = s2 - base;
+            // right arm, bottom → top
+            return { x: halfWidth, y: bottomY - s3 };
           },
         };
       });
