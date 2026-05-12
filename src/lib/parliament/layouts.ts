@@ -2,8 +2,6 @@ import type { Party, SeatPos, Section, WestminsterSide } from "./types";
 
 const SEAT_R = 1;
 const SPACING = 2.4; // center-to-center distance in SVG units
-/** Empty seat slots inserted between sections to physically separate them. */
-const SECTION_GAP = 2;
 
 interface FlatItem {
   partyId?: string; // undefined = blank gap
@@ -13,8 +11,10 @@ interface FlatItem {
 /**
  * Order parties by their first containing section, inserting empty gap slots
  * between sections so they are physically separated in the diagram.
+ * `gap` is the number of blank slots inserted per section boundary — pass the
+ * row count for arc layouts so a full radial slice is removed (no touching seats).
  */
-function flattenWithSections(parties: Party[], sections: Section[]): FlatItem[] {
+function flattenWithSections(parties: Party[], sections: Section[], gap: number): FlatItem[] {
   const items: FlatItem[] = [];
   const used = new Set<string>();
   const relevant = sections.filter((s) =>
@@ -22,7 +22,7 @@ function flattenWithSections(parties: Party[], sections: Section[]): FlatItem[] 
   );
 
   relevant.forEach((sec, idx) => {
-    if (idx > 0) for (let g = 0; g < SECTION_GAP; g++) items.push({});
+    if (idx > 0) for (let g = 0; g < gap; g++) items.push({});
     sec.partyIds.forEach((pid) => {
       const p = parties.find((x) => x.id === pid);
       if (!p || used.has(pid)) return;
@@ -33,7 +33,7 @@ function flattenWithSections(parties: Party[], sections: Section[]): FlatItem[] 
 
   const rest = parties.filter((p) => !used.has(p.id) && p.seats > 0);
   if (rest.length > 0 && relevant.length > 0) {
-    for (let g = 0; g < SECTION_GAP; g++) items.push({});
+    for (let g = 0; g < gap; g++) items.push({});
   }
   rest.forEach((p) => {
     for (let i = 0; i < p.seats; i++) items.push({ partyId: p.id });
