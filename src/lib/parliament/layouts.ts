@@ -98,24 +98,22 @@ function buildHemicycleRows(total: number): RowPlan[] {
   return [];
 }
 
-/* ---------------- HORSESHOE (EXACT U) ---------------- */
+/* ---------------- HORSESHOE (U with curved base) ---------------- */
 
 /**
- * Exact U-shape: two straight vertical arms joined by a straight flat base.
- * Each row is an offset rectangular U, so the open top and arm ends stay flat.
- * Path is traversed left↓, base →, right↑.
+ * U-shape: two straight vertical arms joined by a semicircular curved base.
+ * Arms keep flat rectangular ends at the top; base curves smoothly.
+ * Path: left arm top→bottom, semicircle left→right (through bottom), right arm bottom→top.
  */
 function buildHorseshoeRows(total: number): RowPlan[] {
   let R = 1;
   while (R < 200) {
     const r0 = R;
-    const H = r0 + R; // straight arm height (in spacing units), keeps a balanced U
+    const H = r0 + R; // straight arm length (in spacing units)
     const caps: number[] = [];
     for (let i = 0; i < R; i++) {
       const halfWidth = r0 + i;
-      const bottomOffset = i;
-      const vertical = H + bottomOffset;
-      const len = 2 * vertical + 2 * halfWidth;
+      const len = 2 * H + Math.PI * halfWidth;
       caps.push(Math.floor(len) + 1);
     }
     if (caps.reduce((a, b) => a + b, 0) >= total) {
@@ -123,27 +121,27 @@ function buildHorseshoeRows(total: number): RowPlan[] {
       return alloc.map((n, i) => {
         const halfWidth = (r0 + i) * SPACING;
         const topY = -H * SPACING;
-        const bottomY = i * SPACING;
-        const vertical = bottomY - topY;
-        const base = halfWidth * 2;
-        const totalLen = vertical * 2 + base;
+        const armLen = -topY; // arm runs from topY up to y=0 (semicircle center)
+        const arcLen = Math.PI * halfWidth;
+        const totalLen = 2 * armLen + arcLen;
         return {
           n,
           place: (j, k) => {
             const t = k === 1 ? 0.5 : j / (k - 1);
             const s = t * totalLen;
-            if (s <= vertical) {
-              // left arm, top → bottom
+            if (s <= armLen) {
+              // left arm, top → bottom (down to y=0)
               return { x: -halfWidth, y: topY + s };
             }
-            const s2 = s - vertical;
-            if (s2 <= base) {
-              // flat base, left → right
-              return { x: -halfWidth + s2, y: bottomY };
+            const s2 = s - armLen;
+            if (s2 <= arcLen) {
+              // semicircle centered at (0,0), going from angle π → 0 via -π/2 (bottom)
+              const a = Math.PI - (s2 / arcLen) * Math.PI;
+              return { x: halfWidth * Math.cos(a), y: halfWidth * Math.sin(a) };
             }
-            const s3 = s2 - base;
-            // right arm, bottom → top
-            return { x: halfWidth, y: bottomY - s3 };
+            const s3 = s2 - arcLen;
+            // right arm, bottom (y=0) → top
+            return { x: halfWidth, y: -s3 };
           },
         };
       });
