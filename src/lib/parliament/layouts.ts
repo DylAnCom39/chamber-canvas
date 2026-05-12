@@ -112,7 +112,7 @@ function buildHorseshoeRows(total: number): RowPlan[] {
     const caps: number[] = [];
     for (let i = 0; i < R; i++) {
       const r = r0 + i;
-      const h = H + i; // outer rows have slightly taller columns so they stay parallel
+      const h = H; // all rows share the same column height → rectangular ends
       const len = 2 * h + Math.PI * r;
       caps.push(Math.floor(len) + 1);
     }
