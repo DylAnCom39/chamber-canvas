@@ -123,7 +123,7 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
           {title}
         </text>
       )}
-      {sectionEls}
+      
       {seatEls}
       {legendEls}
     </svg>
