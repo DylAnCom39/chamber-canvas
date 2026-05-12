@@ -1,6 +1,6 @@
 import { forwardRef, useMemo } from "react";
-import type { Party, ParliamentConfig, SeatPos, Section } from "@/lib/parliament/types";
-import { SEAT_SPACING, computeLayout } from "@/lib/parliament/layouts";
+import type { Party, ParliamentConfig, SeatPos } from "@/lib/parliament/types";
+import { computeLayout } from "@/lib/parliament/layouts";
 
 interface Props {
   config: ParliamentConfig;
@@ -27,19 +27,6 @@ function partyMap(parties: Party[]) {
   return new Map(parties.map((p) => [p.id, p]));
 }
 
-/** Polar to cartesian using same convention as layouts (y = -r sin) */
-function polar(r: number, a: number) {
-  return { x: r * Math.cos(a), y: -r * Math.sin(a) };
-}
-
-function arcPath(rOuter: number, startA: number, endA: number) {
-  const p1 = polar(rOuter, startA);
-  const p2 = polar(rOuter, endA);
-  const sweep = endA < startA ? 1 : 0; // y-axis flipped
-  const large = Math.abs(endA - startA) > Math.PI ? 1 : 0;
-  return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${large} ${sweep} ${p2.x} ${p2.y}`;
-}
-
 export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref) => {
   const { layout, parties, sections, title } = config;
   const result = useMemo(() => computeLayout(layout, parties, sections), [layout, parties, sections]);
@@ -48,96 +35,14 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
 
   const bb = bbox(seats);
   const padX = 6;
-  const padTop = 14; // for section labels
+  const padTop = title ? 8 : 4;
   const padBottom = 4;
   const vbX = bb.minX - padX;
-  const vbY = bb.minY - padTop;
   const vbW = bb.maxX - bb.minX + padX * 2;
   const vbH = bb.maxY - bb.minY + padTop + padBottom;
+  const vbY = bb.minY - padTop;
 
-  // ----- Section indicators -----
-  const sectionEls: React.ReactNode[] = [];
-
-  if (layout === "hemicycle" || layout === "horseshoe") {
-    // For each section, find seats and compute angle range from outer ring.
-    const seatsBySec = new Map<string, SeatPos[]>();
-    for (const s of seats) {
-      if (!s.sectionId) continue;
-      const arr = seatsBySec.get(s.sectionId) ?? [];
-      arr.push(s);
-      seatsBySec.set(s.sectionId, arr);
-    }
-    // Determine outer radius from seats:
-    const rOuter =
-      Math.max(...seats.map((s) => Math.hypot(s.x, s.y)), 0) + SEAT_SPACING * 1.1;
-    sections.forEach((sec) => {
-      const arr = seatsBySec.get(sec.id);
-      if (!arr || arr.length === 0) return;
-      const angles = arr.map((s) => Math.atan2(-s.y, s.x));
-      const a1 = Math.max(...angles);
-      const a2 = Math.min(...angles);
-      // pad slightly outward in angle by a small amount
-      const pad = 0.02;
-      const start = a1 + pad;
-      const end = a2 - pad;
-      const color = pmap.get(sec.partyIds[0])?.fill ?? "#666";
-      const path = arcPath(rOuter, start, end);
-      // Label position at midpoint
-      const mid = (start + end) / 2;
-      const labelR = rOuter + 2.2;
-      const lp = polar(labelR, mid);
-      sectionEls.push(
-        <g key={sec.id}>
-          <path d={path} stroke={color} strokeWidth={0.7} fill="none" opacity={0.9} />
-          <text
-            x={lp.x}
-            y={lp.y}
-            fontSize={1.8}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fill="currentColor"
-          >
-            {sec.name}
-          </text>
-        </g>,
-      );
-    });
-  } else if (layout === "westminster") {
-    // Draw horizontal bracket above the columns spanned by each section's seats.
-    const seatsBySec = new Map<string, SeatPos[]>();
-    for (const s of seats) {
-      if (!s.sectionId) continue;
-      const arr = seatsBySec.get(s.sectionId) ?? [];
-      arr.push(s);
-      seatsBySec.set(s.sectionId, arr);
-    }
-    sections.forEach((sec) => {
-      const arr = seatsBySec.get(sec.id);
-      if (!arr || arr.length === 0) return;
-      const xs = arr.map((s) => s.x);
-      const ys = arr.map((s) => s.y);
-      const minX = Math.min(...xs) - SEAT_R;
-      const maxX = Math.max(...xs) + SEAT_R;
-      const topY = Math.min(...ys) - SEAT_SPACING * 0.9;
-      const color = pmap.get(sec.partyIds[0])?.fill ?? "#666";
-      sectionEls.push(
-        <g key={sec.id}>
-          <line x1={minX} y1={topY} x2={maxX} y2={topY} stroke={color} strokeWidth={0.5} />
-          <line x1={minX} y1={topY} x2={minX} y2={topY + 0.5} stroke={color} strokeWidth={0.5} />
-          <line x1={maxX} y1={topY} x2={maxX} y2={topY + 0.5} stroke={color} strokeWidth={0.5} />
-          <text
-            x={(minX + maxX) / 2}
-            y={topY - 0.6}
-            fontSize={1.6}
-            textAnchor="middle"
-            fill="currentColor"
-          >
-            {sec.name}
-          </text>
-        </g>,
-      );
-    });
-  }
+  // Sections are visualized as physical gaps between seat groups (handled in layout).
 
   // ----- Seat circles -----
   const seatEls = seats.map((s, i) => {
@@ -205,7 +110,7 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
           {title}
         </text>
       )}
-      {sectionEls}
+      
       {seatEls}
       {legendEls}
     </svg>
