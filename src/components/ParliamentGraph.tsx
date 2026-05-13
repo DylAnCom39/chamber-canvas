@@ -134,5 +134,3 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
 });
 
 ParliamentGraph.displayName = "ParliamentGraph";
-
-console.log(result.seats.slice(0, 10));
