@@ -180,7 +180,16 @@ export function ControlsPanel({ config, setConfig }: Props) {
       </Card>
 
       <Card className="p-4 space-y-3">
-        <h3 className="font-semibold">Sections</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">Sections</h3>
+          <label className="flex items-center gap-2 text-xs">
+            <span>Show dividers</span>
+            <Switch
+              checked={config.showDividers}
+              onCheckedChange={(v) => update({ showDividers: v })}
+            />
+          </label>
+        </div>
         {config.layout === "westminster" ? (
           sides.map((side) => {
             const secs = config.sections.filter((s) => s.side === side);
