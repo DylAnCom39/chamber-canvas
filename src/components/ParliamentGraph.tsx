@@ -31,7 +31,6 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
   const { layout, parties, sections, title } = config;
   const result = useMemo(() => computeLayout(layout, parties, sections), [layout, parties, sections]);
   const seats = result.seats;
-  const dividers = result.dividers;
   const pmap = partyMap(parties);
 
   const bb = bbox(seats);
@@ -43,21 +42,7 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
   const vbH = bb.maxY - bb.minY + padTop + padBottom;
   const vbY = bb.minY - padTop;
 
-  // ----- Divider lines (hard, straight section separators) -----
-  const dividerEls = dividers.map((d, i) => {
-    const pts = d.points.map((p) => `${p.x},${p.y}`).join(" ");
-    return (
-      <polyline
-        key={`div-${i}`}
-        points={pts}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={0.35}
-        strokeLinecap="round"
-        opacity={0.85}
-      />
-    );
-  });
+  // Sections are visualized as physical gaps between seat groups (handled in layout).
 
   // ----- Seat circles -----
   const seatEls = seats.map((s, i) => {
@@ -126,7 +111,6 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
         </text>
       )}
       
-      {dividerEls}
       {seatEls}
       {legendEls}
     </svg>
