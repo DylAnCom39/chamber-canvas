@@ -28,10 +28,10 @@ function partyMap(parties: Party[]) {
 }
 
 export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref) => {
-  const { layout, parties, sections, title } = config;
+  const { layout, parties, sections, title, showDividers } = config;
   const result = useMemo(() => computeLayout(layout, parties, sections), [layout, parties, sections]);
   const seats = result.seats;
-  const dividers = result.dividers;
+  const dividers = showDividers ? result.dividers : [];
   const pmap = partyMap(parties);
 
   const bb = bbox(seats);
