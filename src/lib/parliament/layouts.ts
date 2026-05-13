@@ -65,8 +65,8 @@ function allocate(total: number, caps: number[]): number[] {
 interface RowPlan {
   /** seats placed in this row */
   n: number;
-  /** path placement function: returns (x,y,key) for seat j of n. Key aligns radially across rows. */
-  place: (j: number, n: number) => { x: number; y: number; key: number };
+  /** path placement function: returns (x,y) for seat j of n */
+  place: (j: number, n: number) => { x: number; y: number };
 }
 
 function buildHemicycleRows(total: number): RowPlan[] {
@@ -88,7 +88,7 @@ function buildHemicycleRows(total: number): RowPlan[] {
           place: (j, k) => {
             const t = k === 1 ? 0.5 : j / (k - 1);
             const angle = Math.PI - t * Math.PI; // π → 0
-            return { x: r * Math.cos(angle), y: -r * Math.sin(angle), key: t };
+            return { x: r * Math.cos(angle), y: -r * Math.sin(angle) };
           },
         };
       });
@@ -102,8 +102,8 @@ function buildHemicycleRows(total: number): RowPlan[] {
 
 /**
  * U-shape: two straight vertical arms joined by a semicircular curved base.
- * Section gaps form straight horizontal lines on the arms and radial lines on the curve
- * because the key is segment-aware: arm key tracks y, arc key tracks angle.
+ * Arms keep flat rectangular ends at the top; base curves smoothly.
+ * Path: left arm top→bottom, semicircle left→right (through bottom), right arm bottom→top.
  */
 function buildHorseshoeRows(total: number): RowPlan[] {
   let R = 1;
@@ -121,7 +121,7 @@ function buildHorseshoeRows(total: number): RowPlan[] {
       return alloc.map((n, i) => {
         const halfWidth = (r0 + i) * SPACING;
         const topY = -H * SPACING;
-        const armLen = -topY;
+        const armLen = -topY; // arm runs from topY up to y=0 (semicircle center)
         const arcLen = Math.PI * halfWidth;
         const totalLen = 2 * armLen + arcLen;
         return {
@@ -130,18 +130,18 @@ function buildHorseshoeRows(total: number): RowPlan[] {
             const t = k === 1 ? 0.5 : j / (k - 1);
             const s = t * totalLen;
             if (s <= armLen) {
-              const u = s / armLen; // 0..1
-              return { x: -halfWidth, y: topY + s, key: u };
+              // left arm, top → bottom (down to y=0)
+              return { x: -halfWidth, y: topY + s };
             }
             const s2 = s - armLen;
             if (s2 <= arcLen) {
-              const u = s2 / arcLen;
-              const a = Math.PI - u * Math.PI;
-              return { x: halfWidth * Math.cos(a), y: halfWidth * Math.sin(a), key: 1 + u };
+              // semicircle centered at (0,0), going from angle π → 0 via -π/2 (bottom)
+              const a = Math.PI - (s2 / arcLen) * Math.PI;
+              return { x: halfWidth * Math.cos(a), y: halfWidth * Math.sin(a) };
             }
             const s3 = s2 - arcLen;
-            const u = s3 / armLen;
-            return { x: halfWidth, y: -s3, key: 2 + u };
+            // right arm, bottom (y=0) → top
+            return { x: halfWidth, y: -s3 };
           },
         };
       });
@@ -151,13 +151,18 @@ function buildHorseshoeRows(total: number): RowPlan[] {
   return [];
 }
 
-/** Generic placer — assigns items to positions sorted by their alignment key, then row. */
+/** Generic arc/U placer — assigns items to positions in left→right traversal order. */
 function placeArc(items: FlatItem[], rows: RowPlan[]): SeatPos[] {
+  // Generate all positions row by row; within row order is along path direction.
+  // To make parties form vertical "wedges" we sort all positions by their
+  // path-progress ratio, then by row (inner first), so consecutive items end
+  // up stacked.
   type P = { x: number; y: number; key: number; row: number };
   const positions: P[] = [];
   rows.forEach((row, rIdx) => {
     for (let j = 0; j < row.n; j++) {
-      const { x, y, key } = row.place(j, row.n);
+      const { x, y } = row.place(j, row.n);
+      const key = row.n === 1 ? 0.5 : j / (row.n - 1);
       positions.push({ x, y, key, row: rIdx });
     }
   });
@@ -166,7 +171,7 @@ function placeArc(items: FlatItem[], rows: RowPlan[]): SeatPos[] {
   const out: SeatPos[] = [];
   positions.forEach((p, idx) => {
     const item = items[idx];
-    if (!item || !item.partyId) return;
+    if (!item || !item.partyId) return; // gap
     out.push({ x: p.x, y: p.y, partyId: item.partyId, sectionId: item.sectionId });
   });
   return out;
