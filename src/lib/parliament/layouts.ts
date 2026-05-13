@@ -171,25 +171,16 @@ function arcLayout(
       const span = w * usefulU;
 
       const queue = [...groups[g].seats];
-      const maxCols = alloc.reduce((a, b) => Math.max(a, b), 0);
-      // Column-major placement: fill column 0 across all rows (inner→outer),
-      // then column 1, etc. Within each row, seats are evenly spaced across
-      // the group's u window using that row's own count.
-      // Pre-compute per-row write index so we keep the natural order intact.
-      const rowSeats: { i: number; k: number; u: number }[] = [];
-      for (let k = 0; k < maxCols; k++) {
-        for (let i = 0; i < rows.length; i++) {
-          if (k >= alloc[i]) continue;
-          const n = alloc[i];
+      for (let i = 0; i < rows.length; i++) {
+        const n = alloc[i];
+        if (n === 0) continue;
+        // Cell-centered placement within the group's u window.
+        for (let k = 0; k < n; k++) {
           const u = uStart + ((k + 0.5) / n) * span;
-          rowSeats.push({ i, k, u });
+          const pt = rows[i].place(u);
+          const item = queue.shift();
+          if (item) seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
         }
-      }
-      for (const rs of rowSeats) {
-        const item = queue.shift();
-        if (!item) break;
-        const pt = rows[rs.i].place(rs.u);
-        seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
       }
     }
 
@@ -254,22 +245,7 @@ export function westminsterLayout(parties: Party[], sections: Section[]): WestmL
   const benchRows = Math.max(2, Math.ceil(Math.sqrt(Math.max(oppCount, govCount) / 4)));
   const crossRows = Math.max(2, Math.ceil(Math.sqrt(crossCount / 6)));
 
-  // Vertical chamber: opposition on top growing upward, government on bottom
-  // growing downward, both facing each other across a horizontal aisle.
-  // Crossbench sits to the right with a vertical bench (rows extend rightward).
-
-  function totalCols(groups: Group[], rows: number) {
-    return (
-      groups.reduce((a, g) => a + Math.max(1, Math.ceil(g.seats.length / rows)), 0) +
-      Math.max(0, groups.length - 1) * SECTION_GAP_COLS
-    );
-  }
-
-  // Horizontal bench (gov / opp). Columns run along X (centered), rows stack
-  // along Y away from the aisle.
-  function hbench(groups: Group[], rows: number, originY: number, dirY: 1 | -1) {
-    const cols = totalCols(groups, rows);
-    const startX = -((cols - 1) * dx) / 2;
+  function bench(groups: Group[], rows: number, originX: number, originY: number, dirX: 1 | -1) {
     let colCursor = 0;
     const groupBoundaries: number[] = [];
     for (let gi = 0; gi < groups.length; gi++) {
@@ -278,43 +254,45 @@ export function westminsterLayout(parties: Party[], sections: Section[]): WestmL
         colCursor += SECTION_GAP_COLS;
       }
       const g = groups[gi];
-      const gcols = Math.max(1, Math.ceil(g.seats.length / rows));
+      const cols = Math.max(1, Math.ceil(g.seats.length / rows));
       let i = 0;
-      for (let c = 0; c < gcols && i < g.seats.length; c++) {
+      for (let c = 0; c < cols && i < g.seats.length; c++) {
         for (let r = 0; r < rows && i < g.seats.length; r++) {
           const item = g.seats[i++];
           seats.push({
-            x: startX + (colCursor + c) * dx,
-            y: originY + dirY * r * dy,
+            x: originX + dirX * (colCursor + c) * dx,
+            y: originY + r * dy,
             partyId: item.partyId,
             sectionId: item.sectionId,
           });
         }
       }
-      colCursor += gcols;
+      colCursor += cols;
     }
+    // Convert column boundaries to dividers.
     for (const colB of groupBoundaries) {
-      const x = startX + (colB - 0.5) * dx;
-      const y0 = originY - dirY * dy * 0.5;
-      const y1 = originY + dirY * (rows - 1 + 0.5) * dy;
-      const ymin = Math.min(y0, y1);
-      const ymax = Math.max(y0, y1);
-      dividers.push({ points: [{ x, y: ymin }, { x, y: ymax }] });
+      const x = originX + dirX * (colB - 0.5) * dx;
+      const y0 = originY - dy * 0.5;
+      const y1 = originY + (rows - 1 + 0.5) * dy;
+      dividers.push({ points: [{ x, y: y0 }, { x, y: y1 }] });
     }
   }
 
-  hbench(oppGroups, benchRows, -aisle / 2, -1);
-  hbench(govGroups, benchRows, aisle / 2, 1);
+  bench(oppGroups, benchRows, -aisle / 2, 0, -1);
+  bench(govGroups, benchRows, aisle / 2, 0, 1);
 
-  // Crossbench: vertical bench on the right. Bench length runs along Y
-  // (centered), rows extend rightward along X.
+  // Crossbench row above.
   if (crossCount > 0) {
-    const cols = totalCols(crossGroups, crossRows);
-    const startY = -((cols - 1) * dy) / 2;
-    // Place to the right of the widest horizontal bench.
-    const hCols = Math.max(totalCols(oppGroups, benchRows), totalCols(govGroups, benchRows), 1);
-    const originX = ((hCols - 1) * dx) / 2 + aisle;
+    const crossOriginY = -(benchRows + 1) * dy - SPACING * 0.5;
     let colCursor = 0;
+    const crossCols = Math.max(
+      1,
+      crossGroups.reduce((a, g) => a + Math.ceil(g.seats.length / crossRows), 0) +
+        Math.max(0, crossGroups.length - 1) * SECTION_GAP_COLS,
+    );
+    const crossWidth = (crossCols - 1) * dx;
+    const originX = -crossWidth / 2;
+
     const groupBoundaries: number[] = [];
     for (let gi = 0; gi < crossGroups.length; gi++) {
       if (gi > 0) {
@@ -322,26 +300,26 @@ export function westminsterLayout(parties: Party[], sections: Section[]): WestmL
         colCursor += SECTION_GAP_COLS;
       }
       const g = crossGroups[gi];
-      const gcols = Math.max(1, Math.ceil(g.seats.length / crossRows));
+      const cols = Math.max(1, Math.ceil(g.seats.length / crossRows));
       let i = 0;
-      for (let c = 0; c < gcols && i < g.seats.length; c++) {
+      for (let c = 0; c < cols && i < g.seats.length; c++) {
         for (let r = 0; r < crossRows && i < g.seats.length; r++) {
           const item = g.seats[i++];
           seats.push({
-            x: originX + r * dx,
-            y: startY + (colCursor + c) * dy,
+            x: originX + (colCursor + c) * dx,
+            y: crossOriginY - r * dy,
             partyId: item.partyId,
             sectionId: item.sectionId,
           });
         }
       }
-      colCursor += gcols;
+      colCursor += cols;
     }
     for (const colB of groupBoundaries) {
-      const y = startY + (colB - 0.5) * dy;
-      const x0 = originX - dx * 0.5;
-      const x1 = originX + (crossRows - 1 + 0.5) * dx;
-      dividers.push({ points: [{ x: x0, y }, { x: x1, y }] });
+      const x = originX + (colB - 0.5) * dx;
+      const y1 = crossOriginY + dy * 0.5;
+      const y0 = crossOriginY - (crossRows - 1 + 0.5) * dy;
+      dividers.push({ points: [{ x, y: y0 }, { x, y: y1 }] });
     }
   }
 

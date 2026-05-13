@@ -26,7 +26,6 @@ export interface ParliamentConfig {
   /** For hemicycle/horseshoe — flat list. For Westminster — sections grouped by `side`. */
   sections: Section[];
   title: string;
-  showDividers: boolean;
 }
 
 export interface SeatPos {

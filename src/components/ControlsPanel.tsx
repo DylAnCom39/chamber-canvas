@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { Trash2, Plus } from "lucide-react";
 
 interface Props {
@@ -180,16 +179,7 @@ export function ControlsPanel({ config, setConfig }: Props) {
       </Card>
 
       <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">Sections</h3>
-          <label className="flex items-center gap-2 text-xs">
-            <span>Show dividers</span>
-            <Switch
-              checked={config.showDividers}
-              onCheckedChange={(v) => update({ showDividers: v })}
-            />
-          </label>
-        </div>
+        <h3 className="font-semibold">Sections</h3>
         {config.layout === "westminster" ? (
           sides.map((side) => {
             const secs = config.sections.filter((s) => s.side === side);

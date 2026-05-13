@@ -1,46 +1,43 @@
-## Changes
+## Goal
 
-### 1. Column-by-column seat ordering in hemicycle / horseshoe
+Make section dividers in the hemicycle and horseshoe layouts read as clean, hard straight lines between groups of seats, rather than the current "skip a couple of slots" gaps that can look ragged.
 
-Today `arcLayout` walks groups → rows → seats, so within a group it fills the innermost row first, then the next, then the next. Visually that reads as "row by row". When no sections are defined, the entire diagram is one group, so a single party's seats fan out one ring at a time and parties end up stacked in concentric bands.
+## Current behaviour
 
-Fix: switch the placement order to walk **columns first**. A "column" is a radial wedge that crosses every row at the same normalized `u`. For each group:
-- Compute per-row allocations as today (proportional to row capacity).
-- Determine the number of columns = the max allocation across rows in that group.
-- Iterate column index `k` from 0 to columns-1, and for each column, place one seat in every row that still has capacity at that column index, going inner row → outer row.
-- Seats are pulled from the group's queue in that column-major order.
+In `src/lib/parliament/layouts.ts`, sections are separated by inserting `SECTION_GAP = 2` blank seat slots into the flat seat list before placement. Because seat counts per row differ, those blank slots fall at slightly different radial angles in each row, so the resulting gap looks like a soft staircase instead of a crisp line.
 
-Result: the first seats of a party fill the first wedge across all rows, then the next wedge, etc. — matching how parliament diagrams normally read.
+## Proposed approach
 
-Alignment within a group: place each row's seats cell-centered against the group's column count (not the row's own count) so columns line up radially.
+1. Stop using "blank seat slots" for separation. Instead, compute section boundaries as **angular cuts** that are identical for every row.
+   - Hemicycle: pick angles in the range π → 0 where one section ends and the next begins. Every row uses the same angle boundaries, so the empty wedge between sections is a perfectly straight radial line from the inner row to the outer row.
+   - Horseshoe: do the same along the U's parameter (left arm 0..1, arc 1..2, right arm 2..3). Every row cuts at the same parameter, giving straight horizontal gaps on the arms and straight radial gaps on the curved base.
 
-### 2. Westminster: government and opposition face vertically
+2. Allocate seats per section proportionally to that section's total seats, then within each section fill rows inner-to-outer (or by even radial distribution) using the existing `place()`/key sorting.
 
-Currently opposition is placed left of the aisle and government right (`-aisle/2` / `+aisle/2` with `dirX` ±1). Crossbench sits above.
+3. Render an optional thin divider line in the SVG along each cut for extra visual clarity (toggleable, default on). This guarantees the "hard straight line" look even when the gap itself is narrow.
 
-Change to vertical facing:
-- **Opposition** above the aisle (rows grow upward).
-- **Government** below the aisle (rows grow downward).
-- **Crossbench** moves to the side (right of the chamber) so it doesn't collide.
-- The aisle becomes a horizontal gap between the two facing benches.
+4. Add a configurable **gap width** (in seat-spacing units) on the parliament config so the user can tune how wide the empty wedge is. Default to something visibly clean (e.g. 1.5 seat widths of angular space).
 
-Implementation: rewrite the `bench()` helper to take an axis. Rows extend along Y (vertical stacking of bench rows) and columns extend along X. Opposition uses `originY = -aisle/2` growing up (`dirY = -1`); government uses `originY = +aisle/2` growing down (`dirY = +1`). Both share the same X axis so they face each other across a horizontal aisle. Section dividers become horizontal lines between column groups (still perpendicular to the bench length). Crossbench is repositioned to the right with vertical rows.
+5. Westminster is unchanged — sections there are already physically grouped on rectangular benches.
 
-### 3. Divider visibility toggle
+## Technical details
 
-- Add `showDividers: boolean` to `ParliamentConfig` in `src/lib/parliament/types.ts` (default `true`).
-- Initialize it in `src/routes/index.tsx`.
-- Add a `Switch` in `ControlsPanel.tsx` under the Sections card labeled "Show section dividers".
-- In `ParliamentGraph.tsx`, only render `dividerEls` when `config.showDividers` is true.
+- Replace `flattenWithSections` for arc layouts with a per-section allocator:
+  - Compute `totalSeats` and each section's share of the arc's total parameter length (minus the fixed gap budget).
+  - For each row, derive that row's seat count per section by proportional allocation against the section's angular span on that row.
+  - Place seats with the existing `place(j, n)` math, but offset `t` so it falls inside the section's `[tStart, tEnd]` window.
+- Update `placeArc` to accept pre-bucketed section assignments instead of a flat item list.
+- In `ParliamentGraph.tsx`, draw a 1px divider `<line>` (color: `hsl(var(--border))` or current text color) at each boundary angle, spanning from inner row radius to outer row radius. Make this controlled by a new `showDividers` boolean on the config.
+- Extend `ParliamentConfig` with `sectionGap: number` (units of seat spacing) and `showDividers: boolean`, plus controls in `ControlsPanel.tsx` (slider + switch) under the Sections card.
 
 ## Files to change
 
-- `src/lib/parliament/layouts.ts` — column-major placement in `arcLayout`; vertical Westminster bench layout.
-- `src/lib/parliament/types.ts` — add `showDividers`.
-- `src/routes/index.tsx` — default `showDividers: true`.
-- `src/components/ControlsPanel.tsx` — add toggle.
-- `src/components/ParliamentGraph.tsx` — gate divider rendering on `showDividers`.
+- `src/lib/parliament/layouts.ts` — new section-aware arc allocator, divider boundary export.
+- `src/components/ParliamentGraph.tsx` — render divider lines from boundaries.
+- `src/lib/parliament/types.ts` — add `sectionGap`, `showDividers` to `ParliamentConfig`.
+- `src/components/ControlsPanel.tsx` — UI for the two new options.
+- `src/routes/index.tsx` — initialise the two new config fields.
 
 ## Open question
 
-For Westminster facing vertically: should crossbench move to the **right side** of the chamber (vertical rows next to gov/opp) or stay above/below the aisle line? I'm proposing right side to keep the gov/opp facing axis clean — confirm or override.
+Do you want the divider rendered as a visible line, just a clean empty gap, or both (line + gap)?

@@ -20,7 +20,6 @@ const initialConfig: ParliamentConfig = {
     { id: "d", name: "Yellows", seats: 15, fill: "#f4a261", stroke: "#000000", strokeWidth: 0.1 },
   ],
   sections: [],
-  showDividers: true,
 };
 
 function Index() {
