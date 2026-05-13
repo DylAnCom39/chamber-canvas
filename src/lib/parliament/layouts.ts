@@ -1,18 +1,3 @@
-function centreOutOrder(n: number): number[] {
-  const res: number[] = []
-  let left = Math.floor((n - 1) / 2)
-  let right = left + 1
-
-  res.push(left)
-
-  while (left >= 0 || right < n) {
-    if (left >= 0) res.push(left--)
-    if (right < n) res.push(right++)
-  }
-
-  return res
-}
-
 import type { Party, SeatPos, Section, WestminsterSide } from "./types";
 
 const SEAT_R = 1;
@@ -185,8 +170,7 @@ function arcLayout(
       for (let gg = 0; gg < g; gg++) uStart += weights[gg] * usefulU + gapU;
       const span = w * usefulU;
 
-      const ordered = centreOutOrder(groups[g].seats.length);
-      const queue = ordered.map(i => groups[g].seats[i]);
+      const queue = [...groups[g].seats];
       for (let i = 0; i < rows.length; i++) {
         const n = alloc[i];
         if (n === 0) continue;
