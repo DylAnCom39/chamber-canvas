@@ -171,16 +171,25 @@ function arcLayout(
       const span = w * usefulU;
 
       const queue = [...groups[g].seats];
-      for (let i = 0; i < rows.length; i++) {
-        const n = alloc[i];
-        if (n === 0) continue;
-        // Cell-centered placement within the group's u window.
-        for (let k = 0; k < n; k++) {
+      const maxCols = alloc.reduce((a, b) => Math.max(a, b), 0);
+      // Column-major placement: fill column 0 across all rows (inner→outer),
+      // then column 1, etc. Within each row, seats are evenly spaced across
+      // the group's u window using that row's own count.
+      // Pre-compute per-row write index so we keep the natural order intact.
+      const rowSeats: { i: number; k: number; u: number }[] = [];
+      for (let k = 0; k < maxCols; k++) {
+        for (let i = 0; i < rows.length; i++) {
+          if (k >= alloc[i]) continue;
+          const n = alloc[i];
           const u = uStart + ((k + 0.5) / n) * span;
-          const pt = rows[i].place(u);
-          const item = queue.shift();
-          if (item) seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
+          rowSeats.push({ i, k, u });
         }
+      }
+      for (const rs of rowSeats) {
+        const item = queue.shift();
+        if (!item) break;
+        const pt = rows[rs.i].place(rs.u);
+        seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
       }
     }
 
