@@ -1,44 +1,53 @@
 import type { Party, SeatPos, Section, WestminsterSide } from "./types";
 
 const SEAT_R = 1;
-const SPACING = 2.4; // center-to-center distance in SVG units
-/** Empty seat slots inserted between sections to physically separate them. */
-const SECTION_GAP = 2;
+const SPACING = 2.4;
 
-interface FlatItem {
-  partyId?: string; // undefined = blank gap
-  sectionId?: string;
+export interface DividerLine {
+  points: { x: number; y: number }[];
 }
 
-/**
- * Order parties by their first containing section, inserting empty gap slots
- * between sections so they are physically separated in the diagram.
- */
-function flattenWithSections(parties: Party[], sections: Section[]): FlatItem[] {
-  const items: FlatItem[] = [];
+export interface ArcLayoutResult {
+  seats: SeatPos[];
+  kind: "hemicycle" | "horseshoe";
+  dividers: DividerLine[];
+}
+
+export interface WestmLayoutResult {
+  seats: SeatPos[];
+  kind: "westminster";
+  dividers: DividerLine[];
+}
+
+interface Group {
+  sectionId?: string;
+  seats: { partyId: string; sectionId?: string }[];
+}
+
+/** Build ordered seat groups: one per non-empty section, plus a trailing group for unsectioned parties. */
+function buildGroups(parties: Party[], sections: Section[]): Group[] {
+  const groups: Group[] = [];
   const used = new Set<string>();
   const relevant = sections.filter((s) =>
     s.partyIds.some((id) => parties.some((p) => p.id === id && p.seats > 0)),
   );
-
-  relevant.forEach((sec, idx) => {
-    if (idx > 0) for (let g = 0; g < SECTION_GAP; g++) items.push({});
-    sec.partyIds.forEach((pid) => {
+  for (const sec of relevant) {
+    const seats: Group["seats"] = [];
+    for (const pid of sec.partyIds) {
       const p = parties.find((x) => x.id === pid);
-      if (!p || used.has(pid)) return;
+      if (!p || used.has(pid)) continue;
       used.add(pid);
-      for (let i = 0; i < p.seats; i++) items.push({ partyId: pid, sectionId: sec.id });
-    });
-  });
-
-  const rest = parties.filter((p) => !used.has(p.id) && p.seats > 0);
-  if (rest.length > 0 && relevant.length > 0) {
-    for (let g = 0; g < SECTION_GAP; g++) items.push({});
+      for (let i = 0; i < p.seats; i++) seats.push({ partyId: pid, sectionId: sec.id });
+    }
+    if (seats.length > 0) groups.push({ sectionId: sec.id, seats });
   }
-  rest.forEach((p) => {
-    for (let i = 0; i < p.seats; i++) items.push({ partyId: p.id });
-  });
-  return items;
+  const restSeats: Group["seats"] = [];
+  for (const p of parties) {
+    if (used.has(p.id)) continue;
+    for (let i = 0; i < p.seats; i++) restSeats.push({ partyId: p.id });
+  }
+  if (restSeats.length > 0) groups.push({ seats: restSeats });
+  return groups;
 }
 
 /** Allocate `total` units across rows proportional to capacity. */
@@ -47,9 +56,8 @@ function allocate(total: number, caps: number[]): number[] {
   if (sum === 0) return caps.map(() => 0);
   const alloc = caps.map((c) => Math.min(c, Math.floor((total * c) / sum)));
   let diff = total - alloc.reduce((a, b) => a + b, 0);
-  // distribute remaining seats outward then inward
   let i = caps.length - 1;
-  let safety = 10000;
+  let safety = 100000;
   while (diff > 0 && safety-- > 0) {
     if (alloc[i] < caps[i]) {
       alloc[i]++;
@@ -60,199 +68,269 @@ function allocate(total: number, caps: number[]): number[] {
   return alloc;
 }
 
-/* ---------------- HEMICYCLE ---------------- */
-
-interface RowPlan {
-  /** seats placed in this row */
-  n: number;
-  /** path placement function: returns (x,y,key) for seat j of n. Key aligns radially across rows. */
-  place: (j: number, n: number) => { x: number; y: number; key: number };
+interface Row {
+  /** Arc length of this row (used for capacity). */
+  length: number;
+  /** Place a point at parameter u in [0,1] along the row's path. */
+  place: (u: number) => { x: number; y: number };
 }
 
-function buildHemicycleRows(total: number): RowPlan[] {
-  // Find smallest R such that capacity ≥ total.
-  let R = 1;
-  while (R < 200) {
-    const r0 = R;
-    const caps: number[] = [];
-    for (let i = 0; i < R; i++) {
-      const r = r0 + i;
-      caps.push(Math.floor(Math.PI * r) + 1);
-    }
-    if (caps.reduce((a, b) => a + b, 0) >= total) {
-      const alloc = allocate(total, caps);
-      return alloc.map((n, i) => {
-        const r = (r0 + i) * SPACING;
-        return {
-          n,
-          place: (j, k) => {
-            const t = k === 1 ? 0.5 : j / (k - 1);
-            const angle = Math.PI - t * Math.PI; // π → 0
-            return { x: r * Math.cos(angle), y: -r * Math.sin(angle), key: t };
-          },
-        };
-      });
-    }
-    R++;
+function buildHemicycleRows(R: number): Row[] {
+  const r0 = R;
+  const rows: Row[] = [];
+  for (let i = 0; i < R; i++) {
+    const r = (r0 + i) * SPACING;
+    rows.push({
+      length: Math.PI * r,
+      place: (u) => {
+        const a = Math.PI - u * Math.PI;
+        return { x: r * Math.cos(a), y: -r * Math.sin(a) };
+      },
+    });
   }
-  return [];
+  return rows;
 }
 
-/* ---------------- HORSESHOE (U with curved base) ---------------- */
+function buildHorseshoeRows(R: number): Row[] {
+  const r0 = R;
+  const H = r0 + R;
+  const rows: Row[] = [];
+  for (let i = 0; i < R; i++) {
+    const halfWidth = (r0 + i) * SPACING;
+    const armLen = H * SPACING;
+    const arcLen = Math.PI * halfWidth;
+    const total = 2 * armLen + arcLen;
+    rows.push({
+      length: total,
+      place: (u) => {
+        const s = u * total;
+        if (s <= armLen) return { x: -halfWidth, y: -armLen + s };
+        const s2 = s - armLen;
+        if (s2 <= arcLen) {
+          const t = s2 / arcLen;
+          const a = Math.PI - t * Math.PI;
+          return { x: halfWidth * Math.cos(a), y: halfWidth * Math.sin(a) };
+        }
+        const s3 = s2 - arcLen;
+        return { x: halfWidth, y: -s3 };
+      },
+    });
+  }
+  return rows;
+}
 
 /**
- * U-shape: two straight vertical arms joined by a semicircular curved base.
- * Section gaps form straight horizontal lines on the arms and radial lines on the curve
- * because the key is segment-aware: arm key tracks y, arc key tracks angle.
+ * Place groups along arc-style rows so section boundaries are at the SAME
+ * normalized parameter u across every row. That guarantees boundary lines
+ * are perfectly straight (radial in hemicycle / on the horseshoe arc, and
+ * horizontal on the horseshoe arms).
  */
-function buildHorseshoeRows(total: number): RowPlan[] {
-  let R = 1;
-  while (R < 200) {
-    const r0 = R;
-    const H = r0 + R; // straight arm length (in spacing units)
-    const caps: number[] = [];
-    for (let i = 0; i < R; i++) {
-      const halfWidth = r0 + i;
-      const len = 2 * H + Math.PI * halfWidth;
-      caps.push(Math.floor(len) + 1);
+function arcLayout(
+  parties: Party[],
+  sections: Section[],
+  buildRows: (R: number) => Row[],
+  kind: "hemicycle" | "horseshoe",
+): ArcLayoutResult {
+  const groups = buildGroups(parties, sections);
+  const total = groups.reduce((a, g) => a + g.seats.length, 0);
+  if (total === 0) return { seats: [], kind, dividers: [] };
+
+  const numGaps = Math.max(0, groups.length - 1);
+  // Gap width as a fraction of normalized u. Tuned to look like a clean break
+  // ~1.5 seat widths on the outer row.
+  const GAP_U_BASE = 0.04;
+
+  for (let R = 1; R < 300; R++) {
+    const rows = buildRows(R);
+    // Use outer row to set gapU so it matches a visible gap there.
+    const outer = rows[rows.length - 1];
+    const gapU = Math.min(0.15, (1.5 * SPACING) / outer.length);
+    void GAP_U_BASE;
+    const usefulU = Math.max(0, 1 - gapU * numGaps);
+    if (usefulU <= 0) continue;
+
+    // Capacity check: sum across rows of seats fit into useful arc.
+    const totalCapacity = rows.reduce(
+      (a, r) => a + Math.floor((r.length * usefulU) / SPACING) + 1,
+      0,
+    );
+    if (totalCapacity < total) continue;
+
+    const weights = groups.map((g) => g.seats.length / total);
+    const seats: SeatPos[] = [];
+
+    // Allocate each group's seats across rows.
+    for (let g = 0; g < groups.length; g++) {
+      const w = weights[g];
+      const caps = rows.map((r) => Math.max(0, Math.floor((r.length * w * usefulU) / SPACING) + 1));
+      const alloc = allocate(groups[g].seats.length, caps);
+
+      // Group window in u: [uStart, uStart + w*usefulU]
+      let uStart = 0;
+      for (let gg = 0; gg < g; gg++) uStart += weights[gg] * usefulU + gapU;
+      const span = w * usefulU;
+
+      const queue = [...groups[g].seats];
+      for (let i = 0; i < rows.length; i++) {
+        const n = alloc[i];
+        if (n === 0) continue;
+        // Cell-centered placement within the group's u window.
+        for (let k = 0; k < n; k++) {
+          const u = uStart + ((k + 0.5) / n) * span;
+          const pt = rows[i].place(u);
+          const item = queue.shift();
+          if (item) seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
+        }
+      }
     }
-    if (caps.reduce((a, b) => a + b, 0) >= total) {
-      const alloc = allocate(total, caps);
-      return alloc.map((n, i) => {
-        const halfWidth = (r0 + i) * SPACING;
-        const topY = -H * SPACING;
-        const armLen = -topY;
-        const arcLen = Math.PI * halfWidth;
-        const totalLen = 2 * armLen + arcLen;
-        return {
-          n,
-          place: (j, k) => {
-            const t = k === 1 ? 0.5 : j / (k - 1);
-            const s = t * totalLen;
-            if (s <= armLen) {
-              const u = s / armLen; // 0..1
-              return { x: -halfWidth, y: topY + s, key: u };
-            }
-            const s2 = s - armLen;
-            if (s2 <= arcLen) {
-              const u = s2 / arcLen;
-              const a = Math.PI - u * Math.PI;
-              return { x: halfWidth * Math.cos(a), y: halfWidth * Math.sin(a), key: 1 + u };
-            }
-            const s3 = s2 - arcLen;
-            const u = s3 / armLen;
-            return { x: halfWidth, y: -s3, key: 2 + u };
-          },
-        };
-      });
+
+    // Boundary divider polylines: at each gap midpoint, span all rows.
+    const dividers: DividerLine[] = [];
+    for (let g = 1; g < groups.length; g++) {
+      let uStart = 0;
+      for (let gg = 0; gg < g; gg++) uStart += weights[gg] * usefulU + gapU;
+      const uBoundary = uStart - gapU / 2;
+      // Inner boundary: just inside the innermost row; outer: just past outermost.
+      const points: { x: number; y: number }[] = [];
+      // Extend a bit inward (0.6 spacing) and outward (0.6 spacing) for visual reach.
+      const inner = rows[0].place(uBoundary);
+      const outer = rows[rows.length - 1].place(uBoundary);
+      // Compute direction from inner to outer for extension.
+      const dx = outer.x - inner.x;
+      const dy = outer.y - inner.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ext = SPACING * 0.6;
+      points.push({ x: inner.x - (dx / len) * ext, y: inner.y - (dy / len) * ext });
+      points.push({ x: outer.x + (dx / len) * ext, y: outer.y + (dy / len) * ext });
+      dividers.push({ points });
     }
-    R++;
+
+    return { seats, kind, dividers };
   }
-  return [];
+  return { seats: [], kind, dividers: [] };
 }
 
-/** Generic placer — assigns items to positions sorted by their alignment key, then row. */
-function placeArc(items: FlatItem[], rows: RowPlan[]): SeatPos[] {
-  type P = { x: number; y: number; key: number; row: number };
-  const positions: P[] = [];
-  rows.forEach((row, rIdx) => {
-    for (let j = 0; j < row.n; j++) {
-      const { x, y, key } = row.place(j, row.n);
-      positions.push({ x, y, key, row: rIdx });
-    }
-  });
-  positions.sort((a, b) => a.key - b.key || a.row - b.row);
-
-  const out: SeatPos[] = [];
-  positions.forEach((p, idx) => {
-    const item = items[idx];
-    if (!item || !item.partyId) return;
-    out.push({ x: p.x, y: p.y, partyId: item.partyId, sectionId: item.sectionId });
-  });
-  return out;
+export function hemicycleLayout(parties: Party[], sections: Section[]): ArcLayoutResult {
+  return arcLayout(parties, sections, buildHemicycleRows, "hemicycle");
 }
 
-export function hemicycleLayout(parties: Party[], sections: Section[]) {
-  const items = flattenWithSections(parties, sections);
-  const rows = buildHemicycleRows(items.length);
-  return { seats: placeArc(items, rows), kind: "hemicycle" as const };
-}
-
-export function horseshoeLayout(parties: Party[], sections: Section[]) {
-  const items = flattenWithSections(parties, sections);
-  const rows = buildHorseshoeRows(items.length);
-  return { seats: placeArc(items, rows), kind: "horseshoe" as const };
+export function horseshoeLayout(parties: Party[], sections: Section[]): ArcLayoutResult {
+  return arcLayout(parties, sections, buildHorseshoeRows, "horseshoe");
 }
 
 /* ---------------- WESTMINSTER ---------------- */
 
-export function westminsterLayout(parties: Party[], sections: Section[]) {
+export function westminsterLayout(parties: Party[], sections: Section[]): WestmLayoutResult {
   const seats: SeatPos[] = [];
+  const dividers: DividerLine[] = [];
   const dx = SPACING;
   const dy = SPACING;
   const aisle = SPACING * 2.5;
+  const SECTION_GAP_COLS = 1;
 
-  function sideItems(side: WestminsterSide): FlatItem[] {
+  function sideGroups(side: WestminsterSide): Group[] {
     const sideParties = parties.filter((p) => p.side === side);
     const sideSections = sections.filter((s) => s.side === side);
-    return flattenWithSections(sideParties, sideSections);
+    return buildGroups(sideParties, sideSections);
   }
 
-  const oppItems = sideItems("opposition");
-  const govItems = sideItems("government");
-  const crossItems = sideItems("crossbench");
+  const oppGroups = sideGroups("opposition");
+  const govGroups = sideGroups("government");
+  const crossGroups = sideGroups("crossbench");
 
-  const benchRows = Math.max(2, Math.ceil(Math.sqrt(Math.max(oppItems.length, govItems.length) / 4)));
-  const crossRows = Math.max(2, Math.ceil(Math.sqrt(crossItems.length / 6)));
+  const oppCount = oppGroups.reduce((a, g) => a + g.seats.length, 0);
+  const govCount = govGroups.reduce((a, g) => a + g.seats.length, 0);
+  const crossCount = crossGroups.reduce((a, g) => a + g.seats.length, 0);
 
-  function bench(items: FlatItem[], rows: number, originX: number, originY: number, dirX: 1 | -1) {
-    const cols = Math.max(1, Math.ceil(items.length / rows));
-    let i = 0;
-    for (let c = 0; c < cols && i < items.length; c++) {
-      for (let r = 0; r < rows && i < items.length; r++) {
-        const item = items[i++];
-        if (!item.partyId) continue;
-        seats.push({
-          x: originX + dirX * c * dx,
-          y: originY + r * dy,
-          partyId: item.partyId,
-          sectionId: item.sectionId,
-        });
+  const benchRows = Math.max(2, Math.ceil(Math.sqrt(Math.max(oppCount, govCount) / 4)));
+  const crossRows = Math.max(2, Math.ceil(Math.sqrt(crossCount / 6)));
+
+  function bench(groups: Group[], rows: number, originX: number, originY: number, dirX: 1 | -1) {
+    let colCursor = 0;
+    const groupBoundaries: number[] = [];
+    for (let gi = 0; gi < groups.length; gi++) {
+      if (gi > 0) {
+        groupBoundaries.push(colCursor);
+        colCursor += SECTION_GAP_COLS;
       }
+      const g = groups[gi];
+      const cols = Math.max(1, Math.ceil(g.seats.length / rows));
+      let i = 0;
+      for (let c = 0; c < cols && i < g.seats.length; c++) {
+        for (let r = 0; r < rows && i < g.seats.length; r++) {
+          const item = g.seats[i++];
+          seats.push({
+            x: originX + dirX * (colCursor + c) * dx,
+            y: originY + r * dy,
+            partyId: item.partyId,
+            sectionId: item.sectionId,
+          });
+        }
+      }
+      colCursor += cols;
     }
-    return cols;
+    // Convert column boundaries to dividers.
+    for (const colB of groupBoundaries) {
+      const x = originX + dirX * (colB - 0.5) * dx;
+      const y0 = originY - dy * 0.5;
+      const y1 = originY + (rows - 1 + 0.5) * dy;
+      dividers.push({ points: [{ x, y: y0 }, { x, y: y1 }] });
+    }
   }
 
-  bench(oppItems, benchRows, -aisle / 2, 0, -1);
-  bench(govItems, benchRows, aisle / 2, 0, 1);
+  bench(oppGroups, benchRows, -aisle / 2, 0, -1);
+  bench(govGroups, benchRows, aisle / 2, 0, 1);
 
-  // Crossbench centered above the benches.
-  const crossCols = Math.max(1, Math.ceil(crossItems.length / crossRows));
-  const crossWidth = (crossCols - 1) * dx;
-  const crossOriginX = -crossWidth / 2;
-  const crossOriginY = -(benchRows + 1) * dy - SPACING * 0.5;
-  let ci = 0;
-  for (let c = 0; c < crossCols && ci < crossItems.length; c++) {
-    for (let r = 0; r < crossRows && ci < crossItems.length; r++) {
-      const item = crossItems[ci++];
-      if (!item.partyId) continue;
-      seats.push({
-        x: crossOriginX + c * dx,
-        y: crossOriginY - r * dy,
-        partyId: item.partyId,
-        sectionId: item.sectionId,
-      });
+  // Crossbench row above.
+  if (crossCount > 0) {
+    const crossOriginY = -(benchRows + 1) * dy - SPACING * 0.5;
+    let colCursor = 0;
+    const crossCols = Math.max(
+      1,
+      crossGroups.reduce((a, g) => a + Math.ceil(g.seats.length / crossRows), 0) +
+        Math.max(0, crossGroups.length - 1) * SECTION_GAP_COLS,
+    );
+    const crossWidth = (crossCols - 1) * dx;
+    const originX = -crossWidth / 2;
+
+    const groupBoundaries: number[] = [];
+    for (let gi = 0; gi < crossGroups.length; gi++) {
+      if (gi > 0) {
+        groupBoundaries.push(colCursor);
+        colCursor += SECTION_GAP_COLS;
+      }
+      const g = crossGroups[gi];
+      const cols = Math.max(1, Math.ceil(g.seats.length / crossRows));
+      let i = 0;
+      for (let c = 0; c < cols && i < g.seats.length; c++) {
+        for (let r = 0; r < crossRows && i < g.seats.length; r++) {
+          const item = g.seats[i++];
+          seats.push({
+            x: originX + (colCursor + c) * dx,
+            y: crossOriginY - r * dy,
+            partyId: item.partyId,
+            sectionId: item.sectionId,
+          });
+        }
+      }
+      colCursor += cols;
+    }
+    for (const colB of groupBoundaries) {
+      const x = originX + (colB - 0.5) * dx;
+      const y1 = crossOriginY + dy * 0.5;
+      const y0 = crossOriginY - (crossRows - 1 + 0.5) * dy;
+      dividers.push({ points: [{ x, y: y0 }, { x, y: y1 }] });
     }
   }
 
-  return { seats, kind: "westminster" as const };
+  return { seats, kind: "westminster", dividers };
 }
 
 export function computeLayout(
   layout: "hemicycle" | "horseshoe" | "westminster",
   parties: Party[],
   sections: Section[],
-) {
+): ArcLayoutResult | WestmLayoutResult {
   if (layout === "hemicycle") return hemicycleLayout(parties, sections);
   if (layout === "horseshoe") return horseshoeLayout(parties, sections);
   return westminsterLayout(parties, sections);
