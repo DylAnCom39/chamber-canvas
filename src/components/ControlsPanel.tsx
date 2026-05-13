@@ -55,20 +55,8 @@ export function ControlsPanel({ config, setConfig }: Props) {
     const sec = config.sections.find((s) => s.id === secId);
     if (!sec) return;
     const has = sec.partyIds.includes(partyId);
-    update({
-      sections: config.sections.map((s) => {
-        if (s.id === secId) {
-          return {
-            ...s,
-            partyIds: has ? s.partyIds.filter((x) => x !== partyId) : [...s.partyIds, partyId],
-          };
-        }
-        // Remove the party from any other section to enforce uniqueness
-        if (!has && s.partyIds.includes(partyId)) {
-          return { ...s, partyIds: s.partyIds.filter((x) => x !== partyId) };
-        }
-        return s;
-      }),
+    updateSection(secId, {
+      partyIds: has ? sec.partyIds.filter((x) => x !== partyId) : [...sec.partyIds, partyId],
     });
   };
 
