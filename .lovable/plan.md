@@ -1,46 +1,25 @@
-## Changes
+## Problem
 
-### 1. Column-by-column seat ordering in hemicycle / horseshoe
+Right now `arcLayout` builds one group per section, plus a trailing group containing **all** unsectioned parties mixed together. Within that group, seats are placed column-major from a queue that's ordered party-by-party. That keeps each party mostly contiguous, but the boundary between two parties can fall mid-column, producing a partially-shared wedge where the last column of one party also contains the first seats of the next.
 
-Today `arcLayout` walks groups → rows → seats, so within a group it fills the innermost row first, then the next, then the next. Visually that reads as "row by row". When no sections are defined, the entire diagram is one group, so a single party's seats fan out one ring at a time and parties end up stacked in concentric bands.
+## Fix
 
-Fix: switch the placement order to walk **columns first**. A "column" is a radial wedge that crosses every row at the same normalized `u`. For each group:
-- Compute per-row allocations as today (proportional to row capacity).
-- Determine the number of columns = the max allocation across rows in that group.
-- Iterate column index `k` from 0 to columns-1, and for each column, place one seat in every row that still has capacity at that column index, going inner row → outer row.
-- Seats are pulled from the group's queue in that column-major order.
+Allocate seats per **party**, not per group. Each party gets its own contiguous sub-window of the arc, so its seats form a solid block with no shared columns.
 
-Result: the first seats of a party fill the first wedge across all rows, then the next wedge, etc. — matching how parliament diagrams normally read.
+Implementation in `src/lib/parliament/layouts.ts → arcLayout`:
 
-Alignment within a group: place each row's seats cell-centered against the group's column count (not the row's own count) so columns line up radially.
+1. **Two-level layout**: groups (sections + trailing unsectioned bucket) keep their roles for dividers and ordering, but inside each group, split the group's u-window into per-party sub-windows proportional to each party's seat count.
+2. **No gap between parties in the same section** — only section boundaries get the visible `gapU`. Party-to-party transitions inside a section are flush, but each party's seats still occupy a fully separate radial wedge.
+3. **Per-party allocation across rows**: reuse the existing `allocate()` to distribute that party's seats across rows proportional to each row's slice of the party's sub-window.
+4. **Column-major placement per party**: same column-major fill we use today, applied to each party's queue inside its sub-window. This guarantees the party's seats are a single contiguous block.
+5. Trailing "rest" group (unsectioned parties) is treated the same way — each unsectioned party gets its own sub-window inside the rest group's window, so they don't bleed into each other.
 
-### 2. Westminster: government and opposition face vertically
-
-Currently opposition is placed left of the aisle and government right (`-aisle/2` / `+aisle/2` with `dirX` ±1). Crossbench sits above.
-
-Change to vertical facing:
-- **Opposition** above the aisle (rows grow upward).
-- **Government** below the aisle (rows grow downward).
-- **Crossbench** moves to the side (right of the chamber) so it doesn't collide.
-- The aisle becomes a horizontal gap between the two facing benches.
-
-Implementation: rewrite the `bench()` helper to take an axis. Rows extend along Y (vertical stacking of bench rows) and columns extend along X. Opposition uses `originY = -aisle/2` growing up (`dirY = -1`); government uses `originY = +aisle/2` growing down (`dirY = +1`). Both share the same X axis so they face each other across a horizontal aisle. Section dividers become horizontal lines between column groups (still perpendicular to the bench length). Crossbench is repositioned to the right with vertical rows.
-
-### 3. Divider visibility toggle
-
-- Add `showDividers: boolean` to `ParliamentConfig` in `src/lib/parliament/types.ts` (default `true`).
-- Initialize it in `src/routes/index.tsx`.
-- Add a `Switch` in `ControlsPanel.tsx` under the Sections card labeled "Show section dividers".
-- In `ParliamentGraph.tsx`, only render `dividerEls` when `config.showDividers` is true.
+Westminster is unchanged — its bench layout already places each party in its own contiguous column block.
 
 ## Files to change
 
-- `src/lib/parliament/layouts.ts` — column-major placement in `arcLayout`; vertical Westminster bench layout.
-- `src/lib/parliament/types.ts` — add `showDividers`.
-- `src/routes/index.tsx` — default `showDividers: true`.
-- `src/components/ControlsPanel.tsx` — add toggle.
-- `src/components/ParliamentGraph.tsx` — gate divider rendering on `showDividers`.
+- `src/lib/parliament/layouts.ts` — refactor `arcLayout` to allocate per-party within each group's window; keep dividers at group boundaries only.
 
 ## Open question
 
-For Westminster facing vertically: should crossbench move to the **right side** of the chamber (vertical rows next to gov/opp) or stay above/below the aisle line? I'm proposing right side to keep the gov/opp facing axis clean — confirm or override.
+Should party order **inside a section** match the order the user added parties to the section, or follow the order parties appear in the global party list? I'll default to the order they were added to the section (current behavior preserved) unless you say otherwise.
