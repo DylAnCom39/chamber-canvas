@@ -1,4 +1,4 @@
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useMemo, type ReactElement } from "react";
 import type { Party, ParliamentConfig, SeatPos } from "@/lib/parliament/types";
 import { computeLayout } from "@/lib/parliament/layouts";
 
@@ -77,29 +77,60 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
   });
 
   // ----- Legend -----
-  // Render legend as separate <g> below the diagram inside same SVG (so export contains it).
+  // Group parties by section (preserving section order); collect unassigned parties.
+  const assignedIds = new Set<string>();
+  const groups: { title: string | null; parties: Party[] }[] = [];
+  for (const sec of sections) {
+    const secParties = sec.partyIds
+      .map((id) => pmap.get(id))
+      .filter((p): p is Party => !!p);
+    if (secParties.length === 0) continue;
+    secParties.forEach((p) => assignedIds.add(p.id));
+    groups.push({ title: sec.name, parties: secParties });
+  }
+  const unassigned = parties.filter((p) => !assignedIds.has(p.id));
+  if (unassigned.length > 0) {
+    groups.push({ title: groups.length > 0 ? "Other" : null, parties: unassigned });
+  }
+
   const legendItemH = 3;
-  const legendCols = Math.min(3, Math.max(1, Math.ceil(parties.length / 8)));
-  const legendW = vbW;
-  const colW = legendW / legendCols;
+  const legendTitleH = 3.2;
+  const legendGroupGap = 1;
   const legendStartY = bb.maxY + padBottom + 2;
 
-  const legendEls = parties.map((p, i) => {
-    const col = i % legendCols;
-    const row = Math.floor(i / legendCols);
-    const x = vbX + col * colW + 1;
-    const y = legendStartY + row * legendItemH;
-    return (
-      <g key={p.id}>
-        <circle cx={x + 1} cy={y + 1} r={1} fill={p.fill} stroke={p.stroke} strokeWidth={p.strokeWidth} />
-        <text x={x + 3} y={y + 1.6} fontSize={1.7} fill="currentColor">
-          {p.name} ({p.seats})
-        </text>
-      </g>
-    );
+  const legendEls: ReactElement[] = [];
+  let cursorY = legendStartY;
+  const legendX = vbX + 1;
+  groups.forEach((g, gi) => {
+    if (g.title) {
+      legendEls.push(
+        <text
+          key={`g-${gi}-title`}
+          x={legendX}
+          y={cursorY + 2}
+          fontSize={2}
+          fontWeight={700}
+          fill="currentColor"
+        >
+          {g.title}
+        </text>,
+      );
+      cursorY += legendTitleH;
+    }
+    g.parties.forEach((p) => {
+      legendEls.push(
+        <g key={`g-${gi}-${p.id}`}>
+          <circle cx={legendX + 1} cy={cursorY + 1} r={1} fill={p.fill} stroke={p.stroke} strokeWidth={p.strokeWidth} />
+          <text x={legendX + 3} y={cursorY + 1.6} fontSize={1.7} fill="currentColor">
+            {p.name} ({p.seats})
+          </text>
+        </g>,
+      );
+      cursorY += legendItemH;
+    });
+    if (gi < groups.length - 1) cursorY += legendGroupGap;
   });
-  const legendRows = Math.ceil(parties.length / legendCols);
-  const legendH = legendRows * legendItemH + 2;
+  const legendH = cursorY - legendStartY + 2;
 
   const titleH = title ? 4 : 0;
   const totalH = titleH + vbH + legendH;
