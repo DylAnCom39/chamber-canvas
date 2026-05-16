@@ -1,4 +1,4 @@
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useMemo, type ReactElement } from "react";
 import type { Party, ParliamentConfig, SeatPos } from "@/lib/parliament/types";
 import { computeLayout } from "@/lib/parliament/layouts";
 
