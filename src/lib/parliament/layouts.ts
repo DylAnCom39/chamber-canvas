@@ -159,44 +159,43 @@ function arcLayout(
     const weights = groups.map((g) => g.seats.length / total);
     const seats: SeatPos[] = [];
 
-    // Allocate each group's seats across rows, then split per-party so each
-    // party occupies a fully contiguous sub-window (no shared columns).
+    // For each group: build a shared slot grid spanning the group's u-window,
+    // sort slots by angle (inner→outer at the same angle), then have parties
+    // claim consecutive slots in that order.
     for (let g = 0; g < groups.length; g++) {
       const w = weights[g];
-
-      // Group window in u: [uStart, uStart + w*usefulU]
       let uStart = 0;
       for (let gg = 0; gg < g; gg++) uStart += weights[gg] * usefulU + gapU;
       const span = w * usefulU;
       const groupTotal = groups[g].seats.length;
 
-      // Find contiguous party runs inside the group's seat queue.
-      const runs: { partyId: string; sectionId?: string; count: number }[] = [];
-      for (const s of groups[g].seats) {
-        const last = runs[runs.length - 1];
-        if (last && last.partyId === s.partyId) last.count++;
-        else runs.push({ partyId: s.partyId, sectionId: s.sectionId, count: 1 });
-      }
+      // Per-row capacity inside this group's window.
+      const caps = rows.map((r) => Math.max(0, Math.floor((r.length * span) / SPACING)));
+      // If a row's capacity is 0 but we still need seats, allow 1 (small windows).
+      for (let i = 0; i < caps.length; i++) if (caps[i] === 0) caps[i] = 1;
+      const alloc = allocate(groupTotal, caps);
 
-      let pStart = uStart;
-      for (const run of runs) {
-        const pSpan = (run.count / groupTotal) * span;
-        const caps = rows.map((r) => Math.max(0, Math.floor((r.length * pSpan) / SPACING) + 1));
-        const alloc = allocate(run.count, caps);
-        const maxCols = alloc.reduce((a, b) => Math.max(a, b), 0);
-        let placed = 0;
-        outer: for (let k = 0; k < maxCols; k++) {
-          for (let i = 0; i < rows.length; i++) {
-            if (k >= alloc[i]) continue;
-            if (placed >= run.count) break outer;
-            const n = alloc[i];
-            const u = pStart + ((k + 0.5) / n) * pSpan;
-            const pt = rows[i].place(u);
-            seats.push({ x: pt.x, y: pt.y, partyId: run.partyId, sectionId: run.sectionId });
-            placed++;
-          }
+      // Build slot list: each row evenly spaces its allocated seats across the window.
+      const slots: { x: number; y: number; u: number; row: number }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const n = alloc[i];
+        if (n === 0) continue;
+        for (let k = 0; k < n; k++) {
+          const u = uStart + ((k + 0.5) / n) * span;
+          const pt = rows[i].place(u);
+          slots.push({ x: pt.x, y: pt.y, u, row: i });
         }
-        pStart += pSpan;
+      }
+      // Sort by angle (u), then inner→outer at the same angle.
+      slots.sort((a, b) => (a.u - b.u) || (a.row - b.row));
+
+      // Assign each slot in order to the next seat in the group's queue
+      // (queue is already party-ordered, so each party gets a contiguous block).
+      const queue = groups[g].seats;
+      for (let s = 0; s < slots.length && s < queue.length; s++) {
+        const slot = slots[s];
+        const item = queue[s];
+        seats.push({ x: slot.x, y: slot.y, partyId: item.partyId, sectionId: item.sectionId });
       }
     }
 
