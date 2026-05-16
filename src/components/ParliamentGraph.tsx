@@ -98,7 +98,7 @@ export const ParliamentGraph = forwardRef<SVGSVGElement, Props>(({ config }, ref
   const legendGroupGap = 1;
   const legendStartY = bb.maxY + padBottom + 2;
 
-  const legendEls: JSX.Element[] = [];
+  const legendEls: ReactElement[] = [];
   let cursorY = legendStartY;
   const legendX = vbX + 1;
   groups.forEach((g, gi) => {
