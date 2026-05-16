@@ -344,7 +344,7 @@ export function westminsterLayout(parties: Party[], sections: Section[]): WestmL
       colCursor += gcols;
     }
     for (const colB of groupBoundaries) {
-      const y = startY + (colB - 0.5) * dy;
+      const y = startY + (colB + (SECTION_GAP_COLS - 1) / 2) * dy;
       const x0 = originX - dx * 0.5;
       const x1 = originX + (crossRows - 1 + 0.5) * dx;
       dividers.push({ points: [{ x: x0, y }, { x: x1, y }] });
