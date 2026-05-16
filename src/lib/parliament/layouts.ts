@@ -159,37 +159,44 @@ function arcLayout(
     const weights = groups.map((g) => g.seats.length / total);
     const seats: SeatPos[] = [];
 
-    // Allocate each group's seats across rows.
+    // Allocate each group's seats across rows, then split per-party so each
+    // party occupies a fully contiguous sub-window (no shared columns).
     for (let g = 0; g < groups.length; g++) {
       const w = weights[g];
-      const caps = rows.map((r) => Math.max(0, Math.floor((r.length * w * usefulU) / SPACING) + 1));
-      const alloc = allocate(groups[g].seats.length, caps);
 
       // Group window in u: [uStart, uStart + w*usefulU]
       let uStart = 0;
       for (let gg = 0; gg < g; gg++) uStart += weights[gg] * usefulU + gapU;
       const span = w * usefulU;
+      const groupTotal = groups[g].seats.length;
 
-      const queue = [...groups[g].seats];
-      const maxCols = alloc.reduce((a, b) => Math.max(a, b), 0);
-      // Column-major placement: fill column 0 across all rows (inner→outer),
-      // then column 1, etc. Within each row, seats are evenly spaced across
-      // the group's u window using that row's own count.
-      // Pre-compute per-row write index so we keep the natural order intact.
-      const rowSeats: { i: number; k: number; u: number }[] = [];
-      for (let k = 0; k < maxCols; k++) {
-        for (let i = 0; i < rows.length; i++) {
-          if (k >= alloc[i]) continue;
-          const n = alloc[i];
-          const u = uStart + ((k + 0.5) / n) * span;
-          rowSeats.push({ i, k, u });
-        }
+      // Find contiguous party runs inside the group's seat queue.
+      const runs: { partyId: string; sectionId?: string; count: number }[] = [];
+      for (const s of groups[g].seats) {
+        const last = runs[runs.length - 1];
+        if (last && last.partyId === s.partyId) last.count++;
+        else runs.push({ partyId: s.partyId, sectionId: s.sectionId, count: 1 });
       }
-      for (const rs of rowSeats) {
-        const item = queue.shift();
-        if (!item) break;
-        const pt = rows[rs.i].place(rs.u);
-        seats.push({ x: pt.x, y: pt.y, partyId: item.partyId, sectionId: item.sectionId });
+
+      let pStart = uStart;
+      for (const run of runs) {
+        const pSpan = (run.count / groupTotal) * span;
+        const caps = rows.map((r) => Math.max(0, Math.floor((r.length * pSpan) / SPACING) + 1));
+        const alloc = allocate(run.count, caps);
+        const maxCols = alloc.reduce((a, b) => Math.max(a, b), 0);
+        let placed = 0;
+        outer: for (let k = 0; k < maxCols; k++) {
+          for (let i = 0; i < rows.length; i++) {
+            if (k >= alloc[i]) continue;
+            if (placed >= run.count) break outer;
+            const n = alloc[i];
+            const u = pStart + ((k + 0.5) / n) * pSpan;
+            const pt = rows[i].place(u);
+            seats.push({ x: pt.x, y: pt.y, partyId: run.partyId, sectionId: run.sectionId });
+            placed++;
+          }
+        }
+        pStart += pSpan;
       }
     }
 
