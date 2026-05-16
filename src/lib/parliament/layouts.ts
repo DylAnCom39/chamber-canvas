@@ -300,7 +300,7 @@ export function westminsterLayout(parties: Party[], sections: Section[]): WestmL
       colCursor += gcols;
     }
     for (const colB of groupBoundaries) {
-      const x = startX + (colB - 0.5) * dx;
+      const x = startX + (colB + (SECTION_GAP_COLS - 1) / 2) * dx;
       const y0 = originY - dirY * dy * 0.5;
       const y1 = originY + dirY * (rows - 1 + 0.5) * dy;
       const ymin = Math.min(y0, y1);
