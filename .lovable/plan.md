@@ -1,25 +1,45 @@
-## Problem
+## What you want
 
-Right now `arcLayout` builds one group per section, plus a trailing group containing **all** unsectioned parties mixed together. Within that group, seats are placed column-major from a queue that's ordered party-by-party. That keeps each party mostly contiguous, but the boundary between two parties can fall mid-column, producing a partially-shared wedge where the last column of one party also contains the first seats of the next.
+A classic parliament layout (à la parliamentarch / Wikipedia parliament SVGs): a fixed set of seat **slots** arranged in concentric arcs that fill the chosen shape (hemicycle or horseshoe). Slots are ordered by angle around the arc (and inner→outer at each angle), then parties claim consecutive blocks from that ordering. Each party gets one contiguous wedge; no per-party arc allocation, no per-party row balancing.
+
+## Current behaviour (wrong)
+
+`arcLayout` gives each party its **own** sub-window of the arc and balances its seats inner-to-outer within that window. That produces a fan-shaped block per party but rows aren't filled like a real chamber — small parties get a single-seat-wide wedge spanning all rows, and inner/outer balance differs from convention.
 
 ## Fix
 
-Allocate seats per **party**, not per group. Each party gets its own contiguous sub-window of the arc, so its seats form a solid block with no shared columns.
+Replace the per-party allocator with a **single shared slot grid** that's independent of parties. Parties just consume slots in order.
 
-Implementation in `src/lib/parliament/layouts.ts → arcLayout`:
+### Algorithm
 
-1. **Two-level layout**: groups (sections + trailing unsectioned bucket) keep their roles for dividers and ordering, but inside each group, split the group's u-window into per-party sub-windows proportional to each party's seat count.
-2. **No gap between parties in the same section** — only section boundaries get the visible `gapU`. Party-to-party transitions inside a section are flush, but each party's seats still occupy a fully separate radial wedge.
-3. **Per-party allocation across rows**: reuse the existing `allocate()` to distribute that party's seats across rows proportional to each row's slice of the party's sub-window.
-4. **Column-major placement per party**: same column-major fill we use today, applied to each party's queue inside its sub-window. This guarantees the party's seats are a single contiguous block.
-5. Trailing "rest" group (unsectioned parties) is treated the same way — each unsectioned party gets its own sub-window inside the rest group's window, so they don't bleed into each other.
+1. **Pick R (number of rows).** Smallest R such that total slot capacity ≥ total seats.
+2. **Row capacity.** For each row i, capacity `Ci = floor(row_length_i / SPACING)`.
+3. **Per-row allocation.** Distribute total seats across rows proportional to capacity (using existing `allocate()`), so each row holds roughly the same fraction of its capacity filled.
+4. **Place slots.** For row i with `ni` seats, place them at `u = (k + 0.5) / ni` for k = 0..ni-1 along that row's arc parameter (cell-centered). Each slot records `{x, y, u, rowIndex}`.
+5. **Sort slots into seat order.** Primary key: `u` (angle around the arc). Secondary key: `rowIndex` (inner → outer, the convention used by parliamentarch). This gives the canonical "left-to-right, back-to-front" sweep.
+6. **Assign parties.** Walk the sorted slot list in order and assign each slot to the current party until the party's seat count is exhausted, then move to the next party.
 
-Westminster is unchanged — its bench layout already places each party in its own contiguous column block.
+The overall shape is unchanged — same arc geometry, same row spacing.
+
+### Sections (with gaps + dividers)
+
+Sections still need to read as separate angular wedges with a visible gap. Approach:
+
+- Split the arc's u-range [0, 1] into per-section windows, separated by the same `gapU` we use today. Order of windows = order of sections, with unsectioned parties forming a trailing window.
+- For **each section window** independently, run the slot-grid algorithm above (compute per-row caps from that window's arc length, allocate, place, sort by u then row, assign that section's parties in order).
+- Dividers stay at section boundaries only (no dividers between parties).
+
+If a section has no parties, skip its window (don't reserve space for it).
+
+### Westminster
+
+Unchanged — already correct.
 
 ## Files to change
 
-- `src/lib/parliament/layouts.ts` — refactor `arcLayout` to allocate per-party within each group's window; keep dividers at group boundaries only.
+- `src/lib/parliament/layouts.ts` — rewrite the inner placement loop in `arcLayout` to use the shared slot-grid algorithm per group; replace per-party sub-window allocation.
 
-## Open question
+## Notes
 
-Should party order **inside a section** match the order the user added parties to the section, or follow the order parties appear in the global party list? I'll default to the order they were added to the section (current behavior preserved) unless you say otherwise.
+- Each party remains contiguous because slot order is deterministic and parties claim consecutive slots.
+- Inner-to-outer ordering at the same angle means tall thin parties (small seat count in a section) cluster near the inside first, matching standard parliament diagrams. Tell me if you'd prefer outer→inner instead.
